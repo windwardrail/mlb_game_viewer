@@ -24,34 +24,11 @@ pub fn main() {
     let mut sdl_renderer = SDL2Renderer::new();
     let mut event_pump = sdl_renderer.context.sdl_context.event_pump().unwrap();
 
-    let splash = make_spash(&sdl_renderer);
+    let mut loading_scene = make_loading_scene(&sdl_renderer);
+    loading_scene.accept_visitor(&mut sdl_renderer);
+    sdl_renderer.present();
 
-    let loading_message = Text {
-        content: "Loading...".to_owned(),
-        size: 32,
-        pos: Position::new(Point::origin(),Size::new(200, 50)),
-        color: Color::new(0, 255, 0)
-    };
-
-    let url = data::make_url_for_date(String::new());
-    let games = data::fetch_games(url);
-    let mut list_layout = ListLayout::new(Size::new(200, 300));
-    for model in games {
-        list_layout.add_item(GameItemFactory::make(model));
-    }
-
-    let mut v_layout = VCenteredLayout::new(Position::new(Point::origin(), sdl_renderer.viewport_size()));
-
-    let mut list_pos = list_layout.position().clone();
-    list_pos.upper_left.translate(v_layout.position().center().x - (list_layout.item_size.w / 2) as i32, 0);
-    list_layout.set_position(list_pos);
-
-    v_layout.add_child(LayoutItem::Layout(Box::new(list_layout)));
-
-    let mut canvas_layout = CenteredLayout::new(Position::new(Point::origin(), sdl_renderer.viewport_size()));
-    canvas_layout.add_child(LayoutItem::Widget(WidgetType::Image(splash)));
-    canvas_layout.add_child(LayoutItem::Layout(Box::new(v_layout)));
-    let mut root_item = LayoutItem::Layout(Box::new(canvas_layout));
+    let mut loaded_scene = make_loaded_scene(&sdl_renderer);
 
     'running: loop {
         for event in event_pump.poll_iter() {
@@ -59,23 +36,66 @@ pub fn main() {
                 Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                     break 'running
                 },
-                _ => root_item.accept_visitor(&mut SDL2EventPropagator::new(event))
+                _ => loaded_scene.accept_visitor(&mut SDL2EventPropagator::new(event))
             }
         }
 
-        root_item.accept_visitor( &mut sdl_renderer);
+        loaded_scene.accept_visitor( &mut sdl_renderer);
         sdl_renderer.present();
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
     }
 }
 
-fn make_spash(sdl_renderer: &SDL2Renderer) -> Image {
+fn make_splash(sdl_renderer: &SDL2Renderer) -> Image {
     let splash_path = PathBuf::from("./images/background.png");
     if !splash_path.exists() {
         panic!("{} image could not be found", splash_path.to_str().unwrap());
     }
     let splash = Image::new(splash_path, Position::new(Point::origin(), sdl_renderer.viewport_size()));
     splash
+}
+
+fn make_loading_scene(renderer: &SDL2Renderer) -> LayoutItem {
+    let splash = make_splash(renderer);
+
+    let loading_message = Text {
+        content: "Loading...".to_owned(),
+        size: 32,
+        pos: Position::new(Point::origin(),Size::new(200, 50)),
+        color: Color::new(0, 0, 255)
+    };
+
+    let mut c_layout = CenteredLayout::new(Position::new(Point::origin(), renderer.viewport_size()));
+    c_layout.add_child(LayoutItem::Widget(WidgetType::Image(splash)));
+    c_layout.add_child(LayoutItem::Widget(WidgetType::Text(loading_message)));
+
+    LayoutItem::Layout(Box::new(c_layout))
+}
+
+fn make_loaded_scene(renderer: &SDL2Renderer) -> LayoutItem {
+    let url = data::make_url_for_date(String::new());
+    let games = data::fetch_games(url);
+
+    let splash = make_splash(renderer);
+
+    let mut list_layout = ListLayout::new(Size::new(200, 300));
+    for model in games {
+        list_layout.add_item(GameItemFactory::make(model));
+    }
+
+    let mut v_layout = VCenteredLayout::new(Position::new(Point::origin(), renderer.viewport_size()));
+
+    let mut list_pos = list_layout.position().clone();
+    list_pos.upper_left.translate(v_layout.position().center().x - (list_layout.item_size.w / 2) as i32, 0);
+    list_layout.set_position(list_pos);
+
+    v_layout.add_child(LayoutItem::Layout(Box::new(list_layout)));
+
+    let mut canvas_layout = CenteredLayout::new(Position::new(Point::origin(), renderer.viewport_size()));
+    canvas_layout.add_child(LayoutItem::Widget(WidgetType::Image(splash)));
+    canvas_layout.add_child(LayoutItem::Layout(Box::new(v_layout)));
+
+    LayoutItem::Layout(Box::new(canvas_layout))
 }
 
 struct SDL2Renderer {
@@ -256,7 +276,6 @@ impl Visitor<Box<dyn Layout>> for SDL2Renderer {
             i += 1;
         }
         self.coord_reference = translate_to_relative(&self.coord_reference, &element.position().upper_left);
-        // println!("referent coord moved back to {:?}", self.coord_reference);
     }
 }
 

@@ -358,7 +358,6 @@ impl CenteredLayout {
             size: item.position().size.clone()
         };
         item.set_position(new_pos);
-        println!("centered layout child pos: {:?}", item.position());
         self.children.push(item);
     }
 }
@@ -412,20 +411,8 @@ pub trait Positionable {
     fn position(&self) -> &Position;
 }
 
-// impl Positionable for Box<dyn Layout> {
-//     fn set_position(&mut self, pos: Position) {
-//         println!("setting layout position: {:?}", pos);
-//
-//     }
-//
-//     fn position(&self) -> &Position {
-//
-//     }
-// }
-
 impl Positionable for VBoxLayout {
     fn set_position(&mut self, pos: Position) {
-        println!("Positioning vb layout: {:?}", pos);
         self.position = pos;
         self.position_children();
     }
@@ -457,11 +444,9 @@ impl Positionable for Text {
 
 impl Positionable for Image {
     fn set_position(&mut self, pos: Position) {
-        println!("Positioning Image: {:?}", pos);
         if self.preserve_aspect_w {
             let aspect = 16.0 / 9.0;
             let new_size = Size::new(pos.size.w, (pos.size.w as f32 / aspect) as u32);
-            println!("new size: {:?}", new_size);
             self.pos = Position::new(pos.upper_left, new_size);
         } else {
             self.pos = pos;
@@ -535,7 +520,6 @@ impl Positionable for CenteredLayout {
 
 impl Positionable for VCenteredLayout {
     fn set_position(&mut self, pos: Position) {
-        println!("Positioning vc layout: {:?}", pos);
         self.position = pos;
         self.position_children();
     }

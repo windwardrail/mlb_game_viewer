@@ -1,6 +1,9 @@
 mod ui;
+mod data;
 
 extern crate sdl2;
+extern crate image;
+
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use std::time::Duration;
@@ -10,36 +13,32 @@ use sdl2::rwops::RWops;
 use sdl2::gfx::primitives::DrawRenderer;
 use sdl2::surface::Surface;
 use sdl2::image::{InitFlag, ImageRWops, LoadTexture, LoadSurface};
-
 use sdl2::video::Window;
-use sdl2::render::Canvas;
-
+use sdl2::render::{Canvas, Texture};
 use std::path::{PathBuf};
 
 use ui::*;
+use image::{EncodableLayout, ImageError};
 
 pub fn main() {
     let mut sdl_renderer = SDL2Renderer::new();
     let mut event_pump = sdl_renderer.context.sdl_context.event_pump().unwrap();
 
-    let splash_path = PathBuf::from("./images/background.png");
-    if ! splash_path.exists() {
-        panic!("{} image could not be found", splash_path.to_str().unwrap());
-    }
-    let splash = Image::new(splash_path, Position::new(Point::origin(), sdl_renderer.viewport_size()));
-    // println!("initial image position: {:?}", splash.pos);
+    let splash = make_spash(&sdl_renderer);
 
-    let message = Text {
-        content: "Hello Disney Plus".to_owned(),
+    let loading_message = Text {
+        content: "Loading...".to_owned(),
         size: 32,
         pos: Position::new(Point::origin(),Size::new(200, 50)),
         color: Color::new(0, 255, 0)
     };
 
-    let mut list_layout = ListLayout::new(Size::new(300, 200));
-    list_layout.add_item(ListItemFactory::make());
-    list_layout.add_item(ListItemFactory::make());
-    list_layout.add_item(ListItemFactory::make());
+    let url = data::make_url_for_date(String::new());
+    let games = data::fetch_games(url);
+    let mut list_layout = ListLayout::new(Size::new(200, 300));
+    for model in games {
+        list_layout.add_item(GameItemFactory::make(model));
+    }
 
     let mut v_layout = VCenteredLayout::new(Position::new(Point::origin(), sdl_renderer.viewport_size()));
 
@@ -68,6 +67,15 @@ pub fn main() {
         sdl_renderer.present();
         ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
     }
+}
+
+fn make_spash(sdl_renderer: &SDL2Renderer) -> Image {
+    let splash_path = PathBuf::from("./images/background.png");
+    if !splash_path.exists() {
+        panic!("{} image could not be found", splash_path.to_str().unwrap());
+    }
+    let splash = Image::new(splash_path, Position::new(Point::origin(), sdl_renderer.viewport_size()));
+    splash
 }
 
 struct SDL2Renderer {
@@ -113,7 +121,7 @@ impl SDLContext {
     fn new() -> Self {
         let sdl_context = sdl2::init().unwrap();
         let font_context = sdl2::ttf::init().unwrap();
-        let image_context = sdl2::image::init(sdl2::image::InitFlag::all()).unwrap();
+        let image_context = sdl2::image::init(InitFlag::PNG | InitFlag::JPG).unwrap();
 
         SDLContext {
             sdl_context,
@@ -185,24 +193,47 @@ impl Visitor<Frame> for SDL2Renderer {
 impl Visitor<Image> for SDL2Renderer {
     fn visit_element(&mut self, element: &mut Image) {
         let creator = self.canvas.texture_creator();
-        let bg_texture = creator.load_texture(&element.source).unwrap();
+
+        let texture = match &element.source {
+            ImageSource::Path(path) => {
+                match creator.load_texture(path) {
+                    Ok(texture) => { Some(texture) }
+                    Err(_) => { None }
+                }
+            }
+            ImageSource::Bytes(bytes) => {
+                match creator.load_texture_bytes(bytes.as_slice()) {
+                    Ok(texture) => { Some(texture) }
+                    Err(_) => { None }
+                }
+            }
+        };
         let mut dest_pos = element.position().clone();
         dest_pos.upper_left = translate_to_global(&dest_pos.upper_left, &self.coord_reference);
         let Position {upper_left: Point {x, y}, size: Size { w, h }} = dest_pos;
-        self.canvas.copy(&bg_texture, None, Rect::new(x as i32, y as i32, w, h));
+        match texture {
+            None => {
+                self.canvas.set_draw_color(sdl2::pixels::Color::GRAY);
+                self.canvas.fill_rect(Rect::new(x as i32, y as i32, w, h));
+            }
+            Some(t) => {
+                self.canvas.copy(&t, None, Rect::new(x as i32, y as i32, w, h));
+            }
+        }
     }
 }
 
 impl Visitor<Text> for SDL2Renderer {
     fn visit_element(&mut self, element: &mut Text) {
         let Color { r, g, b} = element.color;
-        let Position { upper_left: Point { x, y}, size: Size { w, h} } = element.pos;
         let font_bytes = include_bytes!("../fonts/LeagueGothic-Regular.otf");
-        let font = self.context.font_context.load_font_from_rwops(RWops::from_bytes(font_bytes).unwrap(), 48).unwrap();
-        let font_surface = font.render(element.content.as_str()).solid(sdl2::pixels::Color::RGB(r as u8, g as u8, b as u8)).unwrap();
-        let src_rect = Rect::new(0, 0, w, h);
-        let dest_rect = Rect::new(x as i32, y as i32, w, h);
-        self.canvas.copy(&font_surface.as_texture(&self.canvas.texture_creator()).unwrap(), None, dest_rect);
+        let font = self.context.font_context.load_font_from_rwops(RWops::from_bytes(font_bytes).unwrap(), element.size as u16).unwrap();
+        if let Ok(font_surface) = font.render(element.content.as_str()).blended_wrapped(sdl2::pixels::Color::RGB(r as u8, g as u8, b as u8), element.position().size.w) {
+            let (rendered_w, rendered_h) = font_surface.size();
+            let translated_center = translate_to_global(&element.position().center(), &self.coord_reference);
+            let mut dest_rect = Rect::new(translated_center.x - (rendered_w / 2) as i32, translated_center.y - (rendered_h / 2) as i32, rendered_w, rendered_h);
+            self.canvas.copy(&font_surface.as_texture(&self.canvas.texture_creator()).unwrap(), None, dest_rect);
+        }
     }
 }
 

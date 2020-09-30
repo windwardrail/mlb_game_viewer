@@ -1,6 +1,7 @@
 pub mod layouts;
 
 use std::path::{PathBuf};
+use json::JsonValue;
 
 #[derive(Debug)]
 pub enum Key {
@@ -89,15 +90,32 @@ impl Clone for Position {
     }
 }
 
-#[derive(Debug)]
 pub struct Image {
-    pub(crate) source: PathBuf,
-    pos: Position
+    pub(crate) source: ImageSource,
+    pos: Position,
+    preserve_aspect_w: bool
+}
+
+pub enum ImageSource {
+    Path(PathBuf),
+    Bytes(Vec<u8>)
 }
 
 impl Image {
     pub fn new(source: PathBuf, pos: Position) -> Self {
-        Image { source, pos }
+        Image {
+            source: ImageSource::Path(source),
+            pos,
+            preserve_aspect_w: true
+        }
+    }
+
+    pub fn from_bytes(data: Vec<u8>, pos: Position) -> Self {
+        Image {
+            source: ImageSource::Bytes(data),
+            pos,
+            preserve_aspect_w: true
+        }
     }
 }
 
@@ -172,7 +190,6 @@ impl ListLayout {
             },
             size: self.item_size.clone()
         });
-        println!("item pos: {:?}", item.position());
         self.position.size.w += (self.spacing + self.item_size.w);
         self.children.push(item);
     }
@@ -208,16 +225,116 @@ impl ListItem {
     }
 }
 
-pub(crate) struct ListItemFactory {}
+pub struct GameItemFactory;
 
-impl ListItemFactory {
-    pub(crate) fn make() -> ListItem {
-        let mut item = Frame::empty();
-        item.fill = Some(Color::new(255, 0, 0 ));
-        let mut selected = Frame::empty();
-        selected.fill = Some(Color::new(0, 255, 0));
-        ListItem::new(LayoutItem::Widget(WidgetType::Frame(item)), LayoutItem::Widget(WidgetType::Frame(selected)))
+impl GameItemFactory {
+    pub(crate) fn make(model: crate::data::GameModel) -> ListItem {
+        ListItem::new(GameItemFactory::make_item(&model), GameItemFactory::make_selected_item(&model))
     }
+
+    fn make_item(model: &crate::data::GameModel) -> LayoutItem {
+        let thumbnail = Image::from_bytes(
+            model.image.clone(),
+            Position::new(Point::origin(),
+            Size::new(model.image_w, model.image_h)));
+
+
+        let mut vb_layout = VBoxLayout::new();
+        vb_layout.add_child(LayoutItem::Widget(WidgetType::Image(thumbnail)));
+
+        let mut vc_layout = VCenteredLayout::new(Position::new(Point::origin(), Size::new(200, 300)));
+        vc_layout.add_child(LayoutItem::Layout(Box::new(vb_layout)));
+
+        LayoutItem::Layout(Box::new(vc_layout))
+    }
+
+    fn make_selected_item(model: &crate::data::GameModel) -> LayoutItem {
+        let home_team = Text {
+            content: model.home_team.clone(),
+            size: 18,
+            pos: Position { upper_left: Point::origin(), size: Size::new(0, 30) },
+            color: Color::new(255, 255, 255)
+        };
+
+        let vs = Text {
+            content: "VS".to_owned(),
+            size: 12,
+            pos: Position { upper_left: Point::origin(), size: Size::new(0, 10) },
+            color: Color::new(255, 255, 255)
+        };
+
+        let away_team = Text {
+            content: model.away_team.clone(),
+            size: 18,
+            pos: Position { upper_left: Point::origin(), size: Size::new(0, 30) },
+            color: Color::new(255, 255, 255)
+        };
+
+        let thumbnail = Image::from_bytes(
+            model.image.clone(),
+            Position::new(Point::origin(),
+                          Size::new(model.image_w, model.image_h)));
+
+        let desc = Text {
+            content: model.description.clone(),
+            size: 12,
+            pos: Position::new( Point::origin(), Size::new(0, 30)),
+            color: Color::new(255, 255, 255)
+        };
+
+        let mut vb_layout = VBoxLayout::new();
+        vb_layout.add_child(LayoutItem::Widget(WidgetType::Text(home_team)));
+        vb_layout.add_child(LayoutItem::Widget(WidgetType::Text(vs)));
+        vb_layout.add_child(LayoutItem::Widget(WidgetType::Text(away_team)));
+        vb_layout.add_child(LayoutItem::Widget(WidgetType::Image(thumbnail)));
+        vb_layout.add_child(LayoutItem::Widget(WidgetType::Text(desc)));
+
+        let mut vc_layout = VCenteredLayout::new(Position::new(Point::origin(), Size::new(200, 300)));
+        vc_layout.add_child(LayoutItem::Layout(Box::new(vb_layout)));
+
+        LayoutItem::Layout(Box::new(vc_layout))
+    }
+}
+
+pub struct VBoxLayout {
+    children: Vec<LayoutItem>,
+    position: Position
+}
+
+impl VBoxLayout {
+    pub fn new() -> Self {
+        VBoxLayout {
+            children: vec![],
+            position: Position::new(Point::origin(), Size::new(0, 0))
+        }
+    }
+
+    pub fn add_child(&mut self, item: LayoutItem) {
+        self.children.push(item);
+        self.position_children();
+    }
+
+    fn position_children(&mut self) {
+        let mut h: i32 = 0;
+        for child in &mut self.children {
+            let mut new_pos = child.position().clone();
+            new_pos.size.w = self.position.size.w;
+            new_pos.upper_left = Point::new(0, h);
+            child.set_position(new_pos);
+            h += child.position().size.h as i32;
+        }
+        self.position.size.h = h as u32;
+    }
+}
+
+impl Layout for VBoxLayout {
+    fn child_at(&mut self, index: usize) -> Option<&mut LayoutItem> {
+        self.children.get_mut(index)
+    }
+}
+
+impl Responsive for VBoxLayout {
+    fn handle_key(&mut self, key: Key) -> bool { false }
 }
 
 pub struct CenteredLayout {
@@ -260,23 +377,32 @@ impl VCenteredLayout {
     }
 
     pub(crate) fn add_child(&mut self, mut item: LayoutItem) {
-        let item_pos = item.position();
-        let new_pos = Position {
-            upper_left: Point { x: item_pos.upper_left.x, y: self.position.center().y - (item_pos.size.h / 2) as i32},
-            size: item_pos.size.clone()
-        };
-        item.set_position(new_pos);
+        item.set_position(VCenteredLayout::calculate_position(self.position(), item.position()));
         self.children.push(item);
+    }
+
+    fn calculate_position(layout: &Position, item: &Position) -> Position {
+        Position {
+            upper_left: Point { x: item.upper_left.x, y: layout.center().y - (item.size.h / 2) as i32},
+            size: Size::new(layout.size.w, item.size.h)
+        }
+    }
+
+    fn position_children(&mut self) {
+        let position = self.position().clone();
+        for child in &mut self.children {
+            child.set_position(VCenteredLayout::calculate_position(&position, child.position()));
+        }
     }
 }
 
-pub(crate) enum WidgetType {
+pub enum WidgetType {
     Frame(Frame),
     Image(Image),
     Text(Text)
 }
 
-pub(crate) enum LayoutItem {
+pub enum LayoutItem {
     Layout(Box<dyn Layout>),
     Widget(WidgetType)
 }
@@ -284,6 +410,29 @@ pub(crate) enum LayoutItem {
 pub trait Positionable {
     fn set_position(&mut self, pos: Position);
     fn position(&self) -> &Position;
+}
+
+// impl Positionable for Box<dyn Layout> {
+//     fn set_position(&mut self, pos: Position) {
+//         println!("setting layout position: {:?}", pos);
+//
+//     }
+//
+//     fn position(&self) -> &Position {
+//
+//     }
+// }
+
+impl Positionable for VBoxLayout {
+    fn set_position(&mut self, pos: Position) {
+        println!("Positioning vb layout: {:?}", pos);
+        self.position = pos;
+        self.position_children();
+    }
+
+    fn position(&self) -> &Position {
+        &self.position
+    }
 }
 
 impl Positionable for Frame {
@@ -296,9 +445,27 @@ impl Positionable for Frame {
     }
 }
 
-impl Positionable for Image {
+impl Positionable for Text {
     fn set_position(&mut self, pos: Position) {
         self.pos = pos;
+    }
+
+    fn position(&self) -> &Position {
+        &self.pos
+    }
+}
+
+impl Positionable for Image {
+    fn set_position(&mut self, pos: Position) {
+        println!("Positioning Image: {:?}", pos);
+        if self.preserve_aspect_w {
+            let aspect = 16.0 / 9.0;
+            let new_size = Size::new(pos.size.w, (pos.size.w as f32 / aspect) as u32);
+            println!("new size: {:?}", new_size);
+            self.pos = Position::new(pos.upper_left, new_size);
+        } else {
+            self.pos = pos;
+        }
     }
 
     fn position(&self) -> &Position {
@@ -309,17 +476,17 @@ impl Positionable for Image {
 impl Positionable for WidgetType {
     fn set_position(&mut self, pos: Position) {
         match self {
-            WidgetType::Frame(f) => { f.pos = pos }
-            WidgetType::Image(i) => { i.pos = pos }
-            WidgetType::Text(t) => { t.pos = pos }
+            WidgetType::Frame(f) => { f.set_position(pos) }
+            WidgetType::Image(i) => { i.set_position(pos) }
+            WidgetType::Text(t) => { t.set_position(pos) }
         }
     }
 
     fn position(&self) -> &Position {
         match self {
-            WidgetType::Frame(f) => { &f.pos }
-            WidgetType::Image(i) => { &i.pos }
-            WidgetType::Text(t) => { &t.pos }
+            WidgetType::Frame(f) => { f.position() }
+            WidgetType::Image(i) => { i.position() }
+            WidgetType::Text(t) => { t.position() }
         }
     }
 }
@@ -342,7 +509,12 @@ impl Positionable for LayoutItem {
 
 impl Positionable for ListItem {
     fn set_position(&mut self, pos: Position) {
-        self.item.set_position(pos.clone());
+        let mut scaled_pos = pos.clone();
+        let center = pos.center();
+        scaled_pos.size = Size::new((pos.size.w as f32 * 0.75) as u32, (pos.size.h as f32 * 0.75) as u32);
+        scaled_pos.upper_left.x = center.x - (scaled_pos.size.w / 2) as i32;
+        scaled_pos.upper_left.y = center.y - (scaled_pos.size.h / 2) as i32;
+        self.item.set_position(scaled_pos);
         self.selected_item.set_position(pos);
     }
 
@@ -363,7 +535,9 @@ impl Positionable for CenteredLayout {
 
 impl Positionable for VCenteredLayout {
     fn set_position(&mut self, pos: Position) {
+        println!("Positioning vc layout: {:?}", pos);
         self.position = pos;
+        self.position_children();
     }
 
     fn position(&self) -> &Position {
@@ -381,7 +555,7 @@ impl Positionable for ListLayout {
     }
 }
 
-pub(crate) trait Layout: Positionable + Responsive {
+pub trait Layout: Positionable + Responsive {
     fn child_at(&mut self, index: usize) -> Option<&mut LayoutItem>;
 }
 

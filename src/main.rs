@@ -58,7 +58,7 @@ pub fn main() {
     });
     canvas_layout.add_child(LayoutItem::Widget(WidgetType::Image(splash)));
     canvas_layout.add_child(LayoutItem::Layout(Box::new(v_layout)));
-    let root_item = LayoutItem::Layout(Box::new(canvas_layout));
+    let mut root_item = LayoutItem::Layout(Box::new(canvas_layout));
 
     'running: loop {
         for event in event_pump.poll_iter() {
@@ -66,8 +66,7 @@ pub fn main() {
                 Event::Quit {..} | Event::KeyDown { keycode: Some(Keycode::Escape), .. } => {
                     break 'running
                 },
-                Event::KeyDown { keycode: Some(Keycode::Right), .. } => {},
-                _ => {}
+                _ => root_item.accept_visitor(&mut SDL2EventPropagator::new(event))
             }
         }
 
@@ -281,6 +280,20 @@ impl ListLayout {
         self.position.size.w += (self.spacing + self.item_size.w);
         self.children.push(item);
     }
+
+    fn select_next(&mut self) {
+        if self.selected < self.children.len() - 1 {
+            self.selected += 1;
+            self.position.upper_left.translate(0 - (self.item_size.w + self.spacing) as i32, 0)
+        }
+    }
+
+    fn select_prev(&mut self) {
+        if self.selected > 0 {
+            self.selected -= 1;
+            self.position.upper_left.translate((self.item_size.w + self.spacing) as i32, 0)
+        }
+    }
 }
 
 struct ListItem {
@@ -366,39 +379,87 @@ impl SDLContext {
     }
 }
 
+struct SDL2EventPropagator {
+    event: sdl2::event::Event
+}
+
+impl SDL2EventPropagator {
+    pub fn new(event: Event) -> Self {
+        SDL2EventPropagator { event }
+    }
+}
+
 trait Widget: Positionable {
     fn get_type(&self) -> WidgetType;
 }
 
-trait Layout: Positionable {
-    fn child_at(&self, index: usize) -> Option<&LayoutItem>;
+#[derive(Debug)]
+enum Key {
+    Right,
+    Left
+}
+
+trait Responsive {
+    fn handle_key(&mut self, key: Key) -> bool;
+}
+
+impl Responsive for ListItem {
+    fn handle_key(&mut self, key: Key) -> bool {
+        false
+    }
+}
+
+impl Responsive for ListLayout {
+    fn handle_key(&mut self, key: Key) -> bool {
+        match key {
+            Key::Right => { self.select_next(); }
+            Key::Left => { self.select_prev(); }
+        }
+        true
+    }
+}
+
+impl Responsive for CenteredLayout {
+    fn handle_key(&mut self, key: Key) -> bool {
+        false
+    }
+}
+
+impl Responsive for VCenteredLayout {
+    fn handle_key(&mut self, key: Key) -> bool {
+        false
+    }
+}
+
+trait Layout: Positionable + Responsive {
+    fn child_at(&mut self, index: usize) -> Option<&mut LayoutItem>;
 }
 
 impl Layout for ListItem {
-    fn child_at(&self, _: usize) -> Option<&LayoutItem> {
+    fn child_at(&mut self, _: usize) -> Option<&mut LayoutItem> {
         unimplemented!()
     }
 }
 
 impl Layout for CenteredLayout {
-    fn child_at(&self, index: usize) -> Option<&LayoutItem> {
-        self.children.get(index)
+    fn child_at(&mut self, index: usize) -> Option<&mut LayoutItem> {
+        self.children.get_mut(index)
     }
 }
 
 impl Layout for VCenteredLayout {
-    fn child_at(&self, index: usize) -> Option<&LayoutItem> {
-        self.children.get(index)
+    fn child_at(&mut self, index: usize) -> Option<&mut LayoutItem> {
+        self.children.get_mut(index)
     }
 }
 
 impl Layout for ListLayout {
-    fn child_at(&self, index: usize) -> Option<&LayoutItem> {
-        match self.children.get(index) {
+    fn child_at(&mut self, index: usize) -> Option<&mut LayoutItem> {
+        match self.children.get_mut(index) {
             None => None,
             Some(item) => match index == self.selected {
-                true => Some(&item.selected_item),
-                false => Some(&item.item)
+                true => Some(&mut item.selected_item),
+                false => Some(&mut item.item)
             }
         }
     }
@@ -485,21 +546,59 @@ impl Positionable for WidgetType {
 }
 
 trait Visitee<T> {
-    fn accept_visitor(&self, visitor: &mut dyn Visitor<T>);
+    fn accept_visitor(&mut self, visitor: &mut dyn Visitor<T>);
 }
 
 impl<T> Visitee<T> for T {
-    fn accept_visitor(&self, visitor: &mut dyn Visitor<T>) {
+    fn accept_visitor(&mut self, visitor: &mut dyn Visitor<T>) {
         visitor.visit_element(self);
     }
 }
 
 trait Visitor<T> {
-    fn visit_element(&mut self, element: &T);
+    fn visit_element(&mut self, element: &mut T);
+}
+
+impl Visitor<LayoutItem> for SDL2EventPropagator {
+    fn visit_element(&mut self, element: &mut LayoutItem) {
+        match element {
+            LayoutItem::Layout(layout) => { self.visit_element(layout) }
+            LayoutItem::Widget(widget) => { self.visit_element(widget) }
+        }
+    }
+}
+
+impl Visitor<Box<dyn Layout>> for SDL2EventPropagator {
+    fn visit_element(&mut self, element: &mut Box<dyn Layout>) {
+        let consumed = match self.event {
+            Event::KeyDown { keycode: Some(code), .. } => {
+                if let Some(key) = match code {
+                    Keycode::Right => Some(Key::Right),
+                    Keycode::Left => Some(Key::Left),
+                    _ => { None }
+                } {
+                    element.handle_key(key)
+                } else { false }
+            },
+            _ => { false }
+        };
+
+        if ! consumed {
+            let mut i = 0;
+            while let Some(child) = element.child_at(i) {
+                self.visit_element(child);
+                i += 1;
+            }
+        }
+    }
+}
+
+impl Visitor<WidgetType> for SDL2EventPropagator {
+    fn visit_element(&mut self, element: &mut WidgetType) { }
 }
 
 impl Visitor<Frame> for SDL2Renderer {
-    fn visit_element(&mut self, element: &Frame) {
+    fn visit_element(&mut self, element: &mut Frame) {
         if let Some(color) = &element.fill {
             self.canvas.set_draw_color(sdl2::pixels::Color::RGB(color.r as u8, color.g as u8, color.b as u8));
         }
@@ -510,7 +609,7 @@ impl Visitor<Frame> for SDL2Renderer {
 }
 
 impl Visitor<Image> for SDL2Renderer {
-    fn visit_element(&mut self, element: &Image) {
+    fn visit_element(&mut self, element: &mut Image) {
         let creator = self.canvas.texture_creator();
         let bg_texture = creator.load_texture(&element.source).unwrap();
         let mut dest_pos = element.pos.clone();
@@ -521,7 +620,7 @@ impl Visitor<Image> for SDL2Renderer {
 }
 
 impl Visitor<Text> for SDL2Renderer {
-    fn visit_element(&mut self, element: &Text) {
+    fn visit_element(&mut self, element: &mut Text) {
         let Color { r, g, b} = element.color;
         let Position { upper_left: Point { x, y}, size: Size { w, h} } = element.pos;
         let font_bytes = include_bytes!("../fonts/LeagueGothic-Regular.otf");
@@ -534,7 +633,7 @@ impl Visitor<Text> for SDL2Renderer {
 }
 
 impl Visitor<LayoutItem> for SDL2Renderer {
-    fn visit_element(&mut self, element: &LayoutItem) {
+    fn visit_element(&mut self, element: &mut LayoutItem) {
         match element {
             LayoutItem::Layout(l) => { self.visit_element(l) }
             LayoutItem::Widget(w) => { self.visit_element(w) }
@@ -543,7 +642,7 @@ impl Visitor<LayoutItem> for SDL2Renderer {
 }
 
 impl Visitor<Box<dyn Layout>> for SDL2Renderer {
-    fn visit_element(&mut self, element: &Box<dyn Layout>) {
+    fn visit_element(&mut self, element: &mut Box<dyn Layout>) {
         let mut i = 0;
         self.coord_reference = translate_to_global(&element.position().upper_left, &self.coord_reference);
         // println!("referent coord moved to {:?}", self.coord_reference);
@@ -557,7 +656,7 @@ impl Visitor<Box<dyn Layout>> for SDL2Renderer {
 }
 
 impl Visitor<WidgetType> for SDL2Renderer {
-    fn visit_element(&mut self, element: &WidgetType) {
+    fn visit_element(&mut self, element: &mut WidgetType) {
         match element {
             WidgetType::Frame(frame) => { self.visit_element(frame) }
             WidgetType::Image(image) => { self.visit_element(image) }

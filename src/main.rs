@@ -8,17 +8,11 @@ use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use std::time::Duration;
 use sdl2::rect::{Rect};
-use sdl2::ttf::Sdl2TtfContext;
 use sdl2::rwops::RWops;
-use sdl2::gfx::primitives::DrawRenderer;
-use sdl2::surface::Surface;
-use sdl2::image::{InitFlag, ImageRWops, LoadTexture, LoadSurface};
-use sdl2::video::Window;
-use sdl2::render::{Canvas, Texture};
+use sdl2::image::{InitFlag, LoadTexture};
 use std::path::{PathBuf};
 
 use ui::*;
-use image::{EncodableLayout, ImageError};
 
 pub fn main() {
     let mut sdl_renderer = SDL2Renderer::new();
@@ -196,7 +190,7 @@ impl Visitor<Box<dyn Layout>> for SDL2EventPropagator {
 }
 
 impl Visitor<WidgetType> for SDL2EventPropagator {
-    fn visit_element(&mut self, element: &mut WidgetType) { }
+    fn visit_element(&mut self, _: &mut WidgetType) { }
 }
 
 impl Visitor<Frame> for SDL2Renderer {
@@ -206,7 +200,7 @@ impl Visitor<Frame> for SDL2Renderer {
         }
         let Point { x, y } = translate_to_global(&element.position().upper_left, &self.coord_reference);
         // println!("Drawing frame at {}, {}", x, y);
-        self.canvas.fill_rect(sdl2::rect::Rect::new(x as i32, y as i32, element.position().size.w, element.position().size.h));
+        self.canvas.fill_rect(sdl2::rect::Rect::new(x as i32, y as i32, element.position().size.w, element.position().size.h)).unwrap();
     }
 }
 
@@ -234,10 +228,10 @@ impl Visitor<Image> for SDL2Renderer {
         match texture {
             None => {
                 self.canvas.set_draw_color(sdl2::pixels::Color::GRAY);
-                self.canvas.fill_rect(Rect::new(x as i32, y as i32, w, h));
+                self.canvas.fill_rect(Rect::new(x as i32, y as i32, w, h)).unwrap();
             }
             Some(t) => {
-                self.canvas.copy(&t, None, Rect::new(x as i32, y as i32, w, h));
+                self.canvas.copy(&t, None, Rect::new(x as i32, y as i32, w, h)).unwrap();
             }
         }
     }
@@ -251,8 +245,8 @@ impl Visitor<Text> for SDL2Renderer {
         if let Ok(font_surface) = font.render(element.content.as_str()).blended_wrapped(sdl2::pixels::Color::RGB(r as u8, g as u8, b as u8), element.position().size.w) {
             let (rendered_w, rendered_h) = font_surface.size();
             let translated_center = translate_to_global(&element.position().center(), &self.coord_reference);
-            let mut dest_rect = Rect::new(translated_center.x - (rendered_w / 2) as i32, translated_center.y - (rendered_h / 2) as i32, rendered_w, rendered_h);
-            self.canvas.copy(&font_surface.as_texture(&self.canvas.texture_creator()).unwrap(), None, dest_rect);
+            let dest_rect = Rect::new(translated_center.x - (rendered_w / 2) as i32, translated_center.y - (rendered_h / 2) as i32, rendered_w, rendered_h);
+            self.canvas.copy(&font_surface.as_texture(&self.canvas.texture_creator()).unwrap(), None, dest_rect).unwrap();
         }
     }
 }

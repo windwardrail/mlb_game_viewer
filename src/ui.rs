@@ -1,7 +1,4 @@
-pub mod layouts;
-
 use std::path::{PathBuf};
-use json::JsonValue;
 
 #[derive(Debug)]
 pub enum Key {
@@ -129,29 +126,20 @@ pub struct Text {
 pub struct Frame {
     pos: Position,
     fill: Option<Color>,
-    border: Option<Color>,
-    border_width: u32,
-    radius: u32
 }
 
 impl Frame {
     fn new(position: Position) -> Self {
         Frame {
             pos: position,
-            fill: None,
-            border: None,
-            border_width: 0,
-            radius: 0
+            fill: None
         }
     }
 
     fn empty() -> Self {
         Frame {
             pos: Position { upper_left: Point::origin(), size: Size { w: 0, h: 0 } },
-            fill: None,
-            border: None,
-            border_width: 0,
-            radius: 0
+            fill: None
         }
     }
 
@@ -190,7 +178,7 @@ impl ListLayout {
             },
             size: self.item_size.clone()
         });
-        self.position.size.w += (self.spacing + self.item_size.w);
+        self.position.size.w += self.spacing + self.item_size.w;
         self.children.push(item);
     }
 
@@ -334,7 +322,7 @@ impl Layout for VBoxLayout {
 }
 
 impl Responsive for VBoxLayout {
-    fn handle_key(&mut self, key: Key) -> bool { false }
+    fn handle_key(&mut self, _: Key) -> bool { false }
 }
 
 pub struct CenteredLayout {
@@ -578,7 +566,7 @@ pub trait Responsive {
 }
 
 impl Responsive for ListItem {
-    fn handle_key(&mut self, key: Key) -> bool {
+    fn handle_key(&mut self, _: Key) -> bool {
         false
     }
 }
@@ -594,13 +582,13 @@ impl Responsive for ListLayout {
 }
 
 impl Responsive for CenteredLayout {
-    fn handle_key(&mut self, key: Key) -> bool {
+    fn handle_key(&mut self, _: Key) -> bool {
         false
     }
 }
 
 impl Responsive for VCenteredLayout {
-    fn handle_key(&mut self, key: Key) -> bool {
+    fn handle_key(&mut self, _: Key) -> bool {
         false
     }
 }

@@ -2,9 +2,8 @@ extern crate json;
 extern crate curl;
 
 use curl::easy::Easy;
-use std::io::{stdout, Write};
 use self::json::JsonValue;
-use image::{DynamicImage, ImageError, EncodableLayout};
+use image::EncodableLayout;
 
 pub struct GameModel {
     pub(crate) home_team: String,
@@ -47,7 +46,7 @@ impl GameModel {
                 let jpg_bytes = fetch_bytes(url.to_owned());
                 match image::load_from_memory_with_format(jpg_bytes.as_bytes(), image::ImageFormat::Jpeg) {
                     Ok(loaded_image) => {
-                        loaded_image.write_to(&mut result, image::ImageFormat::Png);
+                        loaded_image.write_to(&mut result, image::ImageFormat::Png).unwrap();
                         result
                     }
                     Err(_) => { result }
